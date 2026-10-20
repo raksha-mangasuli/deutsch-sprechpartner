@@ -2,11 +2,13 @@
 // can be unavailable (private windows, blocked site data).
 
 import { AVATAR_IDS, DEFAULT_AVATAR } from './avatars.js';
+import { sanitizeStreak } from './streak.js';
 
 const KEYS = {
   settings: 'sp.settings',
   chat: 'sp.chat', // legacy single chat, now sp.chat.<partner id>
-  mistakes: 'sp.mistakes'
+  mistakes: 'sp.mistakes',
+  streak: 'sp.streak'
 };
 
 export const DEFAULT_SETTINGS = {
@@ -101,4 +103,12 @@ export function addMistakes(newOnes) {
 
 export function clearMistakes() {
   write(KEYS.mistakes, []);
+}
+
+export function loadStreak() {
+  return sanitizeStreak(read(KEYS.streak, null));
+}
+
+export function saveStreak(streak) {
+  write(KEYS.streak, streak);
 }

@@ -2,6 +2,7 @@ import { ask, parseTurn, ApiError } from './api.js';
 import { buildSystemPrompt, OPENER_REQUEST, SUMMARY_SYSTEM, summaryRequest, SUGGESTIONS } from './prompt.js';
 import { AVATARS, AVATAR_IDS, mountAvatar, setAvatarState } from './avatars.js';
 import { PERSONAS } from './personas.js';
+import { recordPractice, streakStatus } from './streak.js';
 import * as speech from './speech.js';
 import * as store from './storage.js';
 import * as ui from './ui.js';
@@ -17,6 +18,7 @@ const micBtn = $('btn-mic');
 
 let settings = store.loadSettings();
 let history = store.loadChat(settings.avatar);
+let streak = store.loadStreak();
 let busy = false;
 let listener = null;
 let listening = false;
@@ -119,6 +121,43 @@ speech.setSpeechHooks({
   }
 });
 
+/* ---------- daily streak ---------- */
+
+function paintStreak() {
+  const { count, doneToday } = streakStatus(streak);
+  const badge = $('streak');
+  $('streak-count').textContent = String(count);
+  badge.classList.toggle('done', doneToday);
+  badge.classList.toggle('alive', !doneToday && count > 0);
+  const days = `${count} ${count === 1 ? 'day' : 'days'}`;
+  const note = doneToday
+    ? 'You practised today.'
+    : count > 0
+      ? 'Practise today to keep it going.'
+      : 'Send a message to start your streak.';
+  const label = count > 0 ? `${days} in a row. ${note}` : note;
+  badge.setAttribute('aria-label', label);
+  badge.title = label;
+}
+
+// A real exchange (a message and its reply) counts as practice for today.
+function recordPracticeToday() {
+  const wasDone = streakStatus(streak).doneToday;
+  streak = recordPractice(streak);
+  store.saveStreak(streak);
+  paintStreak();
+  if (!wasDone) {
+    const { count } = streakStatus(streak);
+    ui.setStatus(statusEl, count > 1 ? `${count} days in a row. Keep it going!` : 'Streak started. Come back tomorrow!');
+    setTimeout(() => ui.setStatus(statusEl, ''), 4000);
+  }
+}
+
+// The date can change while the page stays open.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) paintStreak();
+});
+
 /* ---------- conversation ---------- */
 
 // Bumped whenever a conversation is cleared, so a reply that was still on its
@@ -165,6 +204,7 @@ async function takeTurn(text, { hidden = false } = {}) {
     chat.push({ role: 'assistant', raw, reply: reply.reply, correction: reply.correction });
     store.addMistakes(reply.mistakes);
     store.saveChat(owner, chat.slice(-100));
+    if (!hidden) recordPracticeToday();
 
     // Only show and speak it if the learner is still in that conversation.
     if (chat === history) {
@@ -546,6 +586,7 @@ function setupSettings() {
 
 mountAvatar(avatarEl, settings.avatar);
 paintPartner();
+paintStreak();
 setupControls();
 setupSettings();
 setupMic();

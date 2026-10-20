@@ -98,7 +98,25 @@ html, body {
 .topbar h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.2px; line-height: 1.15; color: var(--accent); }
 .brand-icon { flex: none; width: 44px; height: 44px; }
 .tagline { margin: 1px 0 0; font-size: 0.78rem; color: var(--muted); }
-.topbar-actions { display: flex; gap: 8px; flex: none; margin-left: 8px; }
+.topbar-actions { display: flex; gap: 8px; flex: none; margin-left: 8px; align-items: center; }
+.streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+/* Alive: practise today to keep it. Done: practised today. */
+.streak.alive svg { color: var(--tip-accent); }
+.streak.alive { color: var(--text); }
+.streak.done { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+.streak.done svg { fill: currentColor; }
 .icon-btn {
   width: 40px; height: 40px;
   border-radius: 50%;
@@ -366,21 +384,28 @@ dialog::backdrop { background: var(--scrim); }
 @media (max-width: 440px) {
   .opt-icon { display: none; }
 }
-@media (max-width: 350px) {
-  .segmented .long { display: none; }
-  .segmented .short { display: inline; }
-}
-
 @media (max-width: 520px) {
   .msg { max-width: 94%; }
   .topbar { padding: 8px 12px 6px; }
   .topbar h1 { font-size: 1.05rem; }
   .brand { gap: 8px; }
   .brand-icon { width: 36px; height: 36px; }
+  .streak { height: 36px; padding: 0 10px; }
   .tagline { display: none; }
   .chat { padding: 12px; }
   .composer { gap: 6px; padding-left: 8px; padding-right: 8px; }
   .send { padding: 0 12px; }
+}
+
+@media (max-width: 350px) {
+  .topbar h1 { font-size: 0.85rem; }
+  .brand-icon { width: 30px; height: 30px; }
+  .brand { gap: 6px; }
+  .topbar-actions { gap: 6px; margin-left: 4px; }
+  .icon-btn { width: 36px; height: 36px; min-height: 36px; }
+  .streak { padding: 0 8px; }
+  .segmented .long { display: none; }
+  .segmented .short { display: inline; }
 }
 
 /* Avatar picker in settings */

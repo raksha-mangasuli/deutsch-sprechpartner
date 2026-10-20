@@ -15,6 +15,7 @@ js/prompt.js          partner system prompt, conversation starters, level notes
 js/api.js             Claude Messages API call and JSON reply parsing
 js/speech.js          voice in (recognition) and voice out (synthesis)
 js/punctuate.js       adds commas, full stops and question marks to dictated German
+js/streak.js          daily practice streak logic
 js/storage.js         settings, chat history, recurring mistake memory
 js/ui.js              rendering helpers
 js/avatars.js         avatar artwork and its animated overlays
@@ -70,3 +71,7 @@ The artwork may only be used if you have the right to use it. Check the licence 
 ## Dictation
 
 Speaking fills the message box. Commas, full stops and question marks are added automatically with simple German rules: every pause ends a sentence, a comma goes before words like "dass", "weil", "aber" and "ob", and questions starting with a question word or a verb ("Wie geht es dir", "Hast du Zeit") end in a question mark. It is a best guess, so check the text before it sends; touching the box cancels the automatic send. Speaking again adds to what is already in the box.
+
+## Daily streak
+
+The flame badge in the header counts the days in a row you have practised. A day counts once you have sent a message and got a reply, so a partner opening the chat on their own does not count. The badge is filled when you have practised today, outlined when the streak is still alive but today is open, and grey at zero. Missing a whole day resets it to 0, and your best streak is kept. Days are your local calendar days, and the streak is stored in this browser only.
