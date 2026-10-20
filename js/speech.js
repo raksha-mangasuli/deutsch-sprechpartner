@@ -6,44 +6,60 @@ const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const canListen = Boolean(Recognition);
 export const canSpeak = 'speechSynthesis' in window;
 
+// How long to wait after the last spoken words before treating the turn as done.
+const SILENCE_MS = 5000;
+
 export function createListener({ onInterim, onFinal, onEnd, onError }) {
   if (!Recognition) return null;
 
   const rec = new Recognition();
   rec.lang = 'de-DE';
   rec.interimResults = true;
-  rec.continuous = false;
+  // Keep listening through short pauses; stop only after a longer silence
+  // (or when the user taps the mic again).
+  rec.continuous = true;
   rec.maxAlternatives = 1;
 
-  let finalText = '';
+  let transcript = '';
+  let silenceTimer = null;
 
-  rec.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const piece = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalText += piece;
-      else interim += piece;
-    }
-    if (interim) onInterim?.((finalText + interim).trim());
+  const clearSilence = () => {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
   };
 
-  rec.onerror = (event) => onError?.(event.error);
+  const stop = () => {
+    clearSilence();
+    try { rec.stop(); } catch { /* not running */ }
+  };
+
+  rec.onresult = (event) => {
+    // Rebuild from every result so repeated events never duplicate text.
+    transcript = Array.from(event.results).map((r) => r[0].transcript).join(' ');
+    onInterim?.(transcript.trim());
+    clearSilence();
+    silenceTimer = setTimeout(stop, SILENCE_MS);
+  };
+
+  rec.onerror = (event) => {
+    clearSilence();
+    onError?.(event.error);
+  };
 
   rec.onend = () => {
-    const text = finalText.trim();
-    finalText = '';
+    clearSilence();
+    const text = transcript.trim();
+    transcript = '';
     onEnd?.();
     if (text) onFinal?.(text);
   };
 
   return {
     start() {
-      finalText = '';
+      transcript = '';
       rec.start();
     },
-    stop() {
-      try { rec.stop(); } catch { /* not running */ }
-    }
+    stop
   };
 }
 
