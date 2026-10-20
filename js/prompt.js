@@ -12,6 +12,7 @@ export const SUGGESTIONS = [
 ];
 
 const LEVEL_NOTES = {
+  A1: 'Use only very short, simple sentences of about 3 to 7 words, with the most common everyday words and mostly the present tense. Ask simple questions the learner can answer in a few words. Speak very slowly, repeat key words, and avoid subordinate clauses, Perfekt and Praeteritum. Use one or two very short sentences per reply. If the learner writes in English, answer with a simple German sentence and say the key German word.',
   A2: 'Use very simple sentences, common words, present tense and Perfekt. Speak slowly in short sentences.',
   B1: 'Use clear everyday German. Mix present, Perfekt and Praeteritum of common verbs, simple subordinate clauses (weil, dass, wenn). Avoid rare idioms and long complex sentences.',
   B2: 'Use natural German with a wider vocabulary, Konjunktiv II, passive, relative clauses and common idioms. Keep it conversational.',
