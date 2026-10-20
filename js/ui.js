@@ -1,5 +1,7 @@
 // Rendering helpers. All text goes through textContent, never innerHTML.
 
+import { plainText } from './text.js';
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -7,24 +9,48 @@ function el(tag, className, text) {
   return node;
 }
 
-function renderEmpty({ hasKey, onStart }) {
+// A small speaker, drawn here so it follows the text colour.
+function speakerIcon() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '18');
+  svg.setAttribute('height', '18');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('fill', 'currentColor');
+  path.setAttribute('d', 'M3 9v6h4l5 4V5L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54z');
+  svg.append(path);
+  return svg;
+}
+
+function renderEmpty({ hasKey, partner, suggestions, onStart, onSuggest }) {
   const box = el('div', 'empty');
-  box.append(el('strong', '', 'Hallo! Bereit zum Sprechen?'));
-  box.append(
-    el(
-      'p',
-      '',
-      hasKey
-        ? 'Pick a topic, then let your partner open the conversation, or just type or speak your first sentence.'
-        : 'Open the settings (gear icon) and add your Anthropic API key to begin.'
-    )
-  );
-  if (hasKey) {
-    const btn = el('button', 'primary', 'Start the conversation');
-    btn.type = 'button';
-    btn.addEventListener('click', onStart);
-    box.append(btn);
+  box.append(el('strong', '', `Hallo! Ich bin ${partner.name}.`));
+  box.append(el('p', '', partner.intro));
+
+  if (!hasKey) {
+    box.append(el('p', '', 'Open the settings (gear icon) and add your Anthropic API key to begin.'));
+    return box;
   }
+
+  box.append(
+    el('p', '', `Say hi, or tell ${partner.name} what you would like to talk about. You can change the subject at any time.`)
+  );
+
+  const start = el('button', 'primary', `Let ${partner.name} start`);
+  start.type = 'button';
+  start.addEventListener('click', onStart);
+  box.append(start);
+
+  const chips = el('div', 'chips');
+  for (const s of suggestions) {
+    const chip = el('button', 'chip', s.label);
+    chip.type = 'button';
+    chip.addEventListener('click', () => onSuggest(s.say));
+    chips.append(chip);
+  }
+  box.append(chips);
   return box;
 }
 
@@ -36,30 +62,16 @@ function renderUser(item) {
 
 function renderBot(item, { onSpeak }) {
   const wrap = el('div', 'msg bot');
-  wrap.append(el('div', 'bubble', item.reply));
+  // Same clean-up as the voice gets, so the bubble shows exactly what is spoken.
+  wrap.append(el('div', 'bubble', plainText(item.reply)));
 
-  const tools = el('div', 'tools');
-
-  const say = el('button', 'tool', 'Listen');
+  const say = el('button', 'listen');
   say.type = 'button';
+  say.title = 'Listen';
+  say.setAttribute('aria-label', 'Listen to this message');
+  say.append(speakerIcon());
   say.addEventListener('click', () => onSpeak(item.reply));
-  tools.append(say);
-
-  if (item.translation) {
-    const tr = el('div', 'translation', item.translation);
-    tr.hidden = !item.open;
-    const toggle = el('button', 'tool', item.open ? 'Hide English' : 'English');
-    toggle.type = 'button';
-    toggle.addEventListener('click', () => {
-      item.open = !item.open;
-      tr.hidden = !item.open;
-      toggle.textContent = item.open ? 'Hide English' : 'English';
-    });
-    tools.append(toggle);
-    wrap.append(tools, tr);
-  } else {
-    wrap.append(tools);
-  }
+  wrap.append(say);
 
   if (item.correction) {
     const fix = el('div', 'fix');
@@ -70,12 +82,12 @@ function renderBot(item, { onSpeak }) {
   return wrap;
 }
 
-export function renderChat(container, history, { hasKey, onStart, onSpeak }) {
+export function renderChat(container, history, { hasKey, partner, suggestions, onStart, onSuggest, onSpeak }) {
   container.replaceChildren();
   const visible = history.filter((h) => !h.hidden);
 
   if (visible.length === 0) {
-    container.append(renderEmpty({ hasKey, onStart }));
+    container.append(renderEmpty({ hasKey, partner, suggestions, onStart, onSuggest }));
     return;
   }
 

@@ -1,9 +1,11 @@
 // Thin wrapper around localStorage. Every access is guarded because storage
 // can be unavailable (private windows, blocked site data).
 
+import { AVATAR_IDS, DEFAULT_AVATAR } from './avatars.js';
+
 const KEYS = {
   settings: 'sp.settings',
-  chat: 'sp.chat',
+  chat: 'sp.chat', // legacy single chat, now sp.chat.<partner id>
   mistakes: 'sp.mistakes'
 };
 
@@ -11,12 +13,12 @@ export const DEFAULT_SETTINGS = {
   apiKey: '',
   model: 'claude-haiku-4-5',
   level: 'B1',
-  topic: 'free',
   mode: 'each',
-  voiceURI: '',
+  voice: '', // '' means automatic, matched to the partner
   rate: 0.95,
   autoSpeak: true,
-  autoSend: true
+  autoSend: true,
+  avatar: DEFAULT_AVATAR
 };
 
 function read(key, fallback) {
@@ -37,20 +39,27 @@ function write(key, value) {
 }
 
 export function loadSettings() {
-  return { ...DEFAULT_SETTINGS, ...read(KEYS.settings, {}) };
+  const settings = { ...DEFAULT_SETTINGS, ...read(KEYS.settings, {}) };
+  if (!AVATAR_IDS.includes(settings.avatar)) settings.avatar = DEFAULT_AVATAR;
+  return settings;
 }
 
 export function saveSettings(settings) {
   write(KEYS.settings, settings);
 }
 
-export function loadChat() {
-  const chat = read(KEYS.chat, []);
+// Every partner keeps their own conversation. The single chat from earlier
+// versions moves over to the default partner the first time it is needed.
+const chatKey = (id) => `${KEYS.chat}.${id}`;
+
+export function loadChat(id) {
+  let chat = read(chatKey(id), null);
+  if (chat === null && id === DEFAULT_AVATAR) chat = read(KEYS.chat, []);
   return Array.isArray(chat) ? chat : [];
 }
 
-export function saveChat(chat) {
-  write(KEYS.chat, chat);
+export function saveChat(id, chat) {
+  write(chatKey(id), chat);
 }
 
 export function loadMistakes() {

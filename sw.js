@@ -1,16 +1,24 @@
 // Caches the app shell so the page opens offline. API calls are never cached.
-const CACHE = 'sprechpartner-v2';
+const CACHE = 'sprechpartner-v31';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './css/styles.css',
+  './css/avatar.css',
   './js/main.js',
   './js/api.js',
+  './js/avatars.js',
+  './js/personas.js',
   './js/prompt.js',
+  './js/punctuate.js',
   './js/speech.js',
   './js/storage.js',
+  './js/text.js',
   './js/ui.js',
+  './assets/avatars/g.png',
+  './assets/avatars/i.png',
+  './assets/avatars/k.png',
   './assets/icon.svg',
   './assets/icon-192.png',
   './assets/icon-512.png',
@@ -38,7 +46,7 @@ self.addEventListener('fetch', (event) => {
 
   // Network first so edits show up after a deploy, cache as offline fallback.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((cache) => cache.put(req, copy));

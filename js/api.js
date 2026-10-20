@@ -2,6 +2,8 @@
 // This is acceptable for personal use because the key never leaves this
 // device. Do not ship this to other people without a backend that hides the key.
 
+import { plainText } from './text.js';
+
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const MAX_HISTORY = 24;
 
@@ -68,25 +70,44 @@ export async function ask({ apiKey, model, system, messages, maxTokens = 600 }) 
   return text;
 }
 
+// Pull the "reply" string out of JSON that is cut off or malformed, so the raw
+// braces and key names are never shown or read aloud.
+function salvageReply(raw) {
+  const m = raw.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)("|$)/);
+  if (!m) return '';
+  // A cut-off string can end in a lone backslash, which JSON.parse would reject.
+  const body = m[1].replace(/\\$/, '');
+  try {
+    return JSON.parse('"' + body + '"');
+  } catch {
+    return body;
+  }
+}
+
 // The model is asked for a single JSON object. Be forgiving if it adds fences
 // or a short preamble, and fall back to treating the whole text as the reply.
 export function parseTurn(raw) {
-  const fallback = { reply: String(raw || '').trim(), translation: '', correction: '', mistakes: [] };
-  if (!raw) return fallback;
+  const text = String(raw || '').trim();
+  const fallback = { reply: plainText(text), correction: '', mistakes: [] };
+  if (!text) return fallback;
 
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start === -1 || end <= start) return fallback;
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1) return fallback;
 
-  try {
-    const obj = JSON.parse(raw.slice(start, end + 1));
-    return {
-      reply: String(obj.reply || '').trim() || fallback.reply,
-      translation: String(obj.translation || '').trim(),
-      correction: String(obj.correction || '').trim(),
-      mistakes: Array.isArray(obj.mistakes) ? obj.mistakes.slice(0, 3) : []
-    };
-  } catch {
-    return fallback;
+  if (end > start) {
+    try {
+      const obj = JSON.parse(text.slice(start, end + 1));
+      return {
+        reply: plainText(obj.reply) || fallback.reply,
+        correction: String(obj.correction || '').trim(),
+        mistakes: Array.isArray(obj.mistakes) ? obj.mistakes.slice(0, 3) : []
+      };
+    } catch {
+      /* fall through to salvage */
+    }
   }
+
+  const salvaged = plainText(salvageReply(text.slice(start)));
+  return salvaged ? { ...fallback, reply: salvaged } : fallback;
 }

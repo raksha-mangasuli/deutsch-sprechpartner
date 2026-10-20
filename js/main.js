@@ -1,5 +1,7 @@
 import { ask, parseTurn, ApiError } from './api.js';
-import { TOPICS, buildSystemPrompt, OPENER_REQUEST, SUMMARY_SYSTEM, summaryRequest } from './prompt.js';
+import { buildSystemPrompt, OPENER_REQUEST, SUMMARY_SYSTEM, summaryRequest, SUGGESTIONS } from './prompt.js';
+import { AVATARS, AVATAR_IDS, mountAvatar, setAvatarState } from './avatars.js';
+import { PERSONAS } from './personas.js';
 import * as speech from './speech.js';
 import * as store from './storage.js';
 import * as ui from './ui.js';
@@ -14,37 +16,114 @@ const sendBtn = $('btn-send');
 const micBtn = $('btn-mic');
 
 let settings = store.loadSettings();
-let history = store.loadChat();
+let history = store.loadChat(settings.avatar);
 let busy = false;
 let listener = null;
 let listening = false;
 
 /* ---------- helpers ---------- */
 
-function apiMessages() {
-  return history.map((h) =>
+function apiMessages(chat = history) {
+  return chat.map((h) =>
     h.role === 'user' ? { role: 'user', content: h.text } : { role: 'assistant', content: h.raw }
   );
 }
 
 function persist() {
-  store.saveChat(history.slice(-100));
+  store.saveChat(settings.avatar, history.slice(-100));
+}
+
+// The person on the other side of the conversation.
+const partner = () => PERSONAS[settings.avatar];
+
+// An explicit voice choice wins; otherwise the voice suits the partner.
+function speakAs(text) {
+  const p = partner();
+  speech.speak(text, { voiceURI: settings.voice, rate: settings.rate, gender: p.gender, voicePick: p.voicePick });
+}
+
+function paintPartner() {
+  $('partner-name').textContent = partner().name;
+  $('partner-tagline').textContent = partner().tagline;
 }
 
 function render() {
   ui.renderChat(chatEl, history, {
     hasKey: Boolean(settings.apiKey),
+    partner: partner(),
+    suggestions: SUGGESTIONS,
     onStart: () => takeTurn(OPENER_REQUEST, { hidden: true }),
-    onSpeak: (text) => speech.speak(text, settings)
+    onSuggest: (say) => takeTurn(say),
+    onSpeak: speakAs
   });
 }
 
 function setBusy(value) {
   busy = value;
   sendBtn.disabled = value;
+  syncAvatar();
 }
 
+/* ---------- avatar ---------- */
+
+const avatarEl = $('avatar');
+let talking = false;
+
+// One place decides the state: speaking beats listening beats thinking.
+function syncAvatar() {
+  setAvatarState(avatarEl, talking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle');
+}
+
+// The browser is the source of truth. From the moment a reply is handed to the
+// voice, check every 150 ms whether it is still speaking or has speech queued,
+// and leave "speaking" only after two empty checks in a row. That way short gaps
+// between chunks never close the mouth.
+const CHECK_MS = 150;
+const START_GRACE_MS = 1500;
+let watch = null;
+
+function stopWatching() {
+  clearInterval(watch);
+  watch = null;
+}
+
+function watchSpeech() {
+  if (watch) return;
+  const startedAt = Date.now();
+  let quiet = 0;
+  watch = setInterval(() => {
+    if (speech.isSpeaking()) {
+      quiet = 0;
+      return;
+    }
+    // iOS Safari can be slow to start, so give it a moment before counting.
+    if (Date.now() - startedAt < START_GRACE_MS) return;
+    if (++quiet >= 2) {
+      stopWatching();
+      talking = false;
+      syncAvatar();
+    }
+  }, CHECK_MS);
+}
+
+speech.setSpeechHooks({
+  onStart: () => {
+    talking = true;
+    syncAvatar();
+    watchSpeech();
+  },
+  onCancel: () => {
+    stopWatching();
+    talking = false;
+    syncAvatar();
+  }
+});
+
 /* ---------- conversation ---------- */
+
+// Bumped whenever a conversation is cleared, so a reply that was still on its
+// way for the old conversation is thrown away instead of appearing in the new one.
+let generation = 0;
 
 async function takeTurn(text, { hidden = false } = {}) {
   if (busy || !text.trim()) return;
@@ -56,8 +135,14 @@ async function takeTurn(text, { hidden = false } = {}) {
   speech.unlockSpeech();
   speech.stopSpeaking();
 
+  // The reply belongs to this partner's conversation, even if the learner
+  // switches partner while it is loading.
+  const owner = settings.avatar;
+  const chat = history;
+  const turn = generation;
+
   const userItem = { role: 'user', text: text.trim(), hidden };
-  history.push(userItem);
+  chat.push(userItem);
   render();
   ui.showTyping(chatEl);
   setBusy(true);
@@ -68,33 +153,34 @@ async function takeTurn(text, { hidden = false } = {}) {
       model: settings.model,
       system: buildSystemPrompt({
         level: settings.level,
-        topic: settings.topic,
+        persona: PERSONAS[owner],
         mode: settings.mode,
         mistakes: store.loadMistakes()
       }),
-      messages: apiMessages()
+      messages: apiMessages(chat)
     });
+    if (turn !== generation) return;
 
-    const turn = parseTurn(raw);
-    history.push({
-      role: 'assistant',
-      raw,
-      reply: turn.reply,
-      translation: turn.translation,
-      correction: turn.correction
-    });
-    store.addMistakes(turn.mistakes);
-    persist();
-    render();
+    const reply = parseTurn(raw);
+    chat.push({ role: 'assistant', raw, reply: reply.reply, correction: reply.correction });
+    store.addMistakes(reply.mistakes);
+    store.saveChat(owner, chat.slice(-100));
 
-    if (settings.autoSpeak) speech.speak(turn.reply, settings);
+    // Only show and speak it if the learner is still in that conversation.
+    if (chat === history) {
+      render();
+      if (settings.autoSpeak) speakAs(reply.reply);
+    }
   } catch (err) {
+    if (turn !== generation) return;
     // Roll back the failed turn so the history stays valid, and give the text back.
-    history.pop();
-    render();
-    ui.showError(chatEl, err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
-    if (!hidden) textEl.value = userItem.text;
-    ui.autoGrow(textEl);
+    chat.pop();
+    if (chat === history) {
+      render();
+      ui.showError(chatEl, err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      if (!hidden) textEl.value = userItem.text;
+      ui.autoGrow(textEl);
+    }
   } finally {
     setBusy(false);
   }
@@ -102,8 +188,16 @@ async function takeTurn(text, { hidden = false } = {}) {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
+  // A reply is still loading: keep the text in the box instead of losing it.
+  if (busy) {
+    ui.setStatus(statusEl, 'Wait for the reply first, then send.');
+    setTimeout(() => ui.setStatus(statusEl, ''), 2500);
+    return;
+  }
   const text = textEl.value;
   if (!text.trim()) return;
+  cancelReview();
+  stopListeningForGood();
   textEl.value = '';
   ui.autoGrow(textEl);
   takeTurn(text);
@@ -157,20 +251,86 @@ async function endAndReview() {
 
 function newConversation() {
   const hasContent = history.some((h) => !h.hidden);
-  if (hasContent && !window.confirm('Start a new conversation? The current one will be cleared.')) return;
+  if (hasContent && !window.confirm(`Start a new conversation with ${partner().name}? The current one will be cleared.`)) return;
+  cancelReview();
+  stopListeningForGood();
   speech.stopSpeaking();
+  generation++;
   history = [];
   persist();
   render();
 }
 
+/* ---------- review before auto-send ---------- */
+
+// After speaking, the text waits a few seconds so it can be checked and edited.
+// Touching or typing in the box cancels the automatic send; the user sends it.
+const REVIEW_SECONDS = 3;
+let reviewTimer = null;
+
+function cancelReview(message) {
+  if (!reviewTimer) return;
+  clearInterval(reviewTimer);
+  reviewTimer = null;
+  ui.setStatus(statusEl, message || '');
+  if (message) setTimeout(() => { if (!reviewTimer) ui.setStatus(statusEl, ''); }, 3500);
+}
+
+function startReview() {
+  cancelReview();
+  let left = REVIEW_SECONDS;
+  const label = () => `Sending in ${left}s. Tap the text to edit it first.`;
+  ui.setStatus(statusEl, label());
+  reviewTimer = setInterval(() => {
+    left -= 1;
+    if (left > 0) {
+      ui.setStatus(statusEl, label());
+      return;
+    }
+    clearInterval(reviewTimer);
+    reviewTimer = null;
+    ui.setStatus(statusEl, '');
+    form.requestSubmit();
+  }, 1000);
+}
+
+// Touching or typing in the box means the user is taking over: stop the
+// microphone for good so it cannot write over the edit, and cancel auto-send.
+for (const type of ['pointerdown', 'keydown', 'input']) {
+  textEl.addEventListener(type, () => {
+    stopListeningForGood();
+    cancelReview('Edit your message, then press Senden.');
+  });
+}
+
 /* ---------- voice input ---------- */
+
+// Stops the microphone and throws away anything it has not delivered yet. It
+// must happen whenever the box is sent or the conversation changes: a recogniser
+// that keeps running would put the old sentence back into the box and send it again.
+function stopListeningForGood() {
+  if (!listening) return;
+  listener.discard();
+  setListening(false);
+  ui.setStatus(statusEl, '');
+}
 
 function setListening(value) {
   listening = value;
   micBtn.classList.toggle('listening', value);
   micBtn.setAttribute('aria-pressed', String(value));
+  syncAvatar();
 }
+
+// Dictation adds to whatever is already in the box instead of replacing it.
+let dictationBase = '';
+let speechError = false;
+const withDictation = (text) => {
+  if (!dictationBase) return text;
+  // Some engines repeat everything said before; do not add it a second time.
+  if (text.toLowerCase().startsWith(dictationBase.toLowerCase())) return text;
+  return `${dictationBase} ${text}`;
+};
 
 function setupMic() {
   if (!speech.canListen) {
@@ -180,17 +340,18 @@ function setupMic() {
 
   listener = speech.createListener({
     onInterim: (text) => {
-      textEl.value = text;
+      textEl.value = withDictation(text);
       ui.autoGrow(textEl);
     },
     onFinal: (text) => {
-      textEl.value = text;
+      textEl.value = withDictation(text);
       ui.autoGrow(textEl);
-      if (settings.autoSend) form.requestSubmit();
+      if (settings.autoSend) startReview();
     },
     onEnd: () => {
       setListening(false);
-      ui.setStatus(statusEl, '');
+      // The browser reports an error and then ends the session: keep the error visible.
+      if (!speechError) ui.setStatus(statusEl, '');
     },
     onError: (code) => {
       setListening(false);
@@ -202,22 +363,26 @@ function setupMic() {
         network: 'Speech recognition needs an internet connection.'
       };
       if (code === 'aborted') return;
+      speechError = true;
       ui.setStatus(statusEl, messages[code] || 'Speech recognition failed.');
       setTimeout(() => ui.setStatus(statusEl, ''), 4500);
     }
   });
 
   micBtn.addEventListener('click', () => {
+    cancelReview();
     speech.unlockSpeech();
     speech.stopSpeaking();
     if (listening) {
       listener.stop();
       return;
     }
+    dictationBase = textEl.value.trim();
+    speechError = false;
     try {
       listener.start();
       setListening(true);
-      ui.setStatus(statusEl, 'Listening... speak German');
+      ui.setStatus(statusEl, dictationBase ? 'Listening... adding to your message' : 'Listening... speak German');
     } catch {
       setListening(false);
     }
@@ -228,22 +393,12 @@ function setupMic() {
 
 function setupControls() {
   const levelSel = $('sel-level');
-  const topicSel = $('sel-topic');
-
-  for (const [key, t] of Object.entries(TOPICS)) {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = t.label;
-    topicSel.append(opt);
-  }
 
   levelSel.value = settings.level;
-  topicSel.value = settings.topic;
-
+  if (!levelSel.value) levelSel.value = 'B1';
   levelSel.addEventListener('change', () => updateSetting({ level: levelSel.value }));
-  topicSel.addEventListener('change', () => updateSetting({ topic: topicSel.value }));
 
-  for (const btn of document.querySelectorAll('.segmented button')) {
+  for (const btn of document.querySelectorAll('#mode-group button')) {
     btn.addEventListener('click', () => {
       updateSetting({ mode: btn.dataset.mode });
       paintMode();
@@ -257,7 +412,7 @@ function setupControls() {
 }
 
 function paintMode() {
-  for (const btn of document.querySelectorAll('.segmented button')) {
+  for (const btn of document.querySelectorAll('#mode-group button')) {
     btn.setAttribute('aria-pressed', String(btn.dataset.mode === settings.mode));
   }
 }
@@ -276,23 +431,52 @@ function fillVoices() {
   const voices = speech.getGermanVoices();
   select.replaceChildren();
 
-  if (voices.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = 'Default voice';
-    select.append(opt);
-    return;
-  }
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'Automatic (suits the partner)';
+  select.append(auto);
+
   for (const v of voices) {
     const opt = document.createElement('option');
     opt.value = v.voiceURI;
     opt.textContent = `${v.name} (${v.lang})`;
     select.append(opt);
   }
-  select.value = voices.some((v) => v.voiceURI === settings.voiceURI) ? settings.voiceURI : voices[0].voiceURI;
+  select.value = voices.some((v) => v.voiceURI === settings.voice) ? settings.voice : '';
+}
+
+function fillAvatars() {
+  const box = $('set-avatar');
+  box.replaceChildren();
+  for (const id of AVATAR_IDS) {
+    const label = document.createElement('label');
+    label.className = 'avatar-option';
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'avatar';
+    radio.value = id;
+    radio.checked = id === settings.avatar;
+
+    const card = document.createElement('span');
+    card.className = 'avatar-card';
+    const img = document.createElement('img');
+    img.src = AVATARS[id].image;
+    img.alt = '';
+    const name = document.createElement('span');
+    name.textContent = AVATARS[id].name;
+    const detail = document.createElement('small');
+    detail.textContent = PERSONAS[id].tagline;
+    card.append(img, name, detail);
+
+    label.append(radio, card);
+    box.append(label);
+  }
 }
 
 function openSettings() {
+  // The dialog keeps its last result, so Escape would otherwise count as Save.
+  dlg.returnValue = '';
   $('set-key').value = settings.apiKey;
   $('set-model').value = settings.model;
   $('set-rate').value = settings.rate;
@@ -301,6 +485,7 @@ function openSettings() {
   $('set-autosend').checked = settings.autoSend;
   $('mistake-count').textContent = `${store.loadMistakes().length} recurring mistakes remembered.`;
   fillVoices();
+  fillAvatars();
   dlg.showModal();
 }
 
@@ -311,9 +496,13 @@ function setupSettings() {
 
   $('btn-testvoice').addEventListener('click', () => {
     speech.unlockSpeech();
-    speech.speak('Hallo! Ich bin dein Sprechpartner. Wollen wir anfangen?', {
+    const picked = document.querySelector('#set-avatar input:checked');
+    const p = PERSONAS[picked ? picked.value : settings.avatar];
+    speech.speak(`Hallo! Ich bin ${p.name}. Wollen wir anfangen?`, {
       voiceURI: $('set-voice').value,
-      rate: Number($('set-rate').value)
+      rate: Number($('set-rate').value),
+      gender: p.gender,
+      voicePick: p.voicePick
     });
   });
 
@@ -326,20 +515,37 @@ function setupSettings() {
 
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'save') return;
+    const pickedAvatar = document.querySelector('#set-avatar input:checked');
+    const before = settings.avatar;
     updateSetting({
+      avatar: pickedAvatar ? pickedAvatar.value : settings.avatar,
       apiKey: $('set-key').value.trim(),
       model: $('set-model').value.trim() || store.DEFAULT_SETTINGS.model,
-      voiceURI: $('set-voice').value,
+      voice: $('set-voice').value,
       rate: Number($('set-rate').value),
       autoSpeak: $('set-autospeak').checked,
       autoSend: $('set-autosend').checked
     });
+    // A new partner brings their own conversation. Rebuilding the SVG restarts
+    // its animation, so only do it for a new choice.
+    if (settings.avatar !== before) {
+      cancelReview();
+      stopListeningForGood();
+      speech.stopSpeaking();
+      history = store.loadChat(settings.avatar);
+      mountAvatar(avatarEl, settings.avatar);
+      paintPartner();
+    }
+    // Turning "Read replies aloud" off also silences a reply that is playing.
+    if (!settings.autoSpeak) speech.stopSpeaking();
     render();
   });
 }
 
 /* ---------- start ---------- */
 
+mountAvatar(avatarEl, settings.avatar);
+paintPartner();
 setupControls();
 setupSettings();
 setupMic();

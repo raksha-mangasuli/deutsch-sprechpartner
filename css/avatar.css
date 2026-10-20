@@ -1,0 +1,91 @@
+/* Tutor avatar. State comes from data-state on .avatar:
+   idle, listening, thinking, speaking. Layout first, then the animation. */
+
+.avatar-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 10px 16px 4px;
+}
+
+.avatar {
+  /* Capped at 190px wide, and never taller than a quarter of the screen. */
+  width: min(190px, calc(26vh * 300 / 399));
+  width: min(190px, calc(26dvh * 300 / 399));
+  aspect-ratio: 300 / 399;
+  background: var(--avatar-bg);
+  border: 2px solid var(--avatar-border);
+  border-radius: 18px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.avatar svg { display: block; width: 100%; height: 100%; }
+
+/* Name next to or under the avatar. */
+.partner-col { display: flex; flex-direction: column; align-items: center; }
+.partner { margin: 0; padding: 0 16px 6px; text-align: center; display: flex; flex-direction: column; gap: 1px; }
+.partner strong { font-size: 0.95rem; }
+.partner span { display: none; font-size: 0.82rem; color: var(--muted); }
+
+/* Phones: a compact profile strip, so the conversation keeps most of the screen.
+   Small picture on the left, name and tagline beside it. */
+@media (max-width: 819px) {
+  .partner-col { flex-direction: row; justify-content: center; align-items: center; gap: 12px; padding: 6px 16px; }
+  .avatar-wrap { padding: 0; }
+  .avatar {
+    width: min(92px, calc(15vh * 300 / 399));
+    width: min(92px, calc(15dvh * 300 / 399));
+    border-radius: 14px;
+  }
+  .partner { align-items: flex-start; text-align: left; padding: 0; }
+  .partner span { display: block; }
+}
+
+/* Wide screens: a larger avatar in its own column on the left. The column and
+   the picture shrink on short screens (a phone held sideways) so nothing scrolls. */
+@media (min-width: 820px) {
+  .partner-col {
+    flex: 0 0 auto;
+    align-items: stretch;
+    min-height: 0;
+    overflow-y: auto;
+    width: min(250px, max(150px, calc((100vh - 300px) * 300 / 399 + 24px)));
+    width: min(250px, max(150px, calc((100dvh - 300px) * 300 / 399 + 24px)));
+  }
+  /* Auto margins centre the block vertically, and still let the column scroll
+     if it is ever taller than the space (plain centring would cut off the top). */
+  .avatar-wrap { align-items: flex-start; padding: 12px 8px 6px 16px; margin-top: auto; }
+  .avatar { width: 100%; }
+  .partner { align-items: flex-start; text-align: left; padding: 0 8px 12px 16px; margin-bottom: auto; }
+  .partner strong { font-size: 1.1rem; }
+  .partner span { display: block; }
+}
+
+.avatar[data-state="speaking"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.avatar[data-state="listening"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+/* Animation: the mockup values, unchanged. */
+@keyframes k1{0%,10%{opacity:0}12%,20%{opacity:1}22%,36%{opacity:0}38%,44%{opacity:1}46%,60%{opacity:0}62%,68%{opacity:1}70%,86%{opacity:0}88%,92%{opacity:1}94%,100%{opacity:0}}
+@keyframes k2{0%,20%{opacity:0}22%,36%{opacity:1}38%,66%{opacity:0}68%,70%{opacity:1}72%,100%{opacity:0}}
+@keyframes k3{0%,44%{opacity:0}46%,52%{opacity:1}54%,100%{opacity:0}}
+@keyframes k4{0%,52%{opacity:0}54%,60%{opacity:1}62%,76%{opacity:0}78%,86%{opacity:1}88%,100%{opacity:0}}
+@keyframes kc{0%,4%{opacity:1}6%,92%{opacity:0}95%,100%{opacity:1}}
+@keyframes bob{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-2px) rotate(-.6deg)}}
+@keyframes lid{0%,92%,100%{opacity:0}94%,96%{opacity:1}}
+
+.avatar .m{opacity:0;animation:none}
+.avatar .c{opacity:1;animation:none}
+.avatar .lid{opacity:0;animation:lid 4.2s infinite}
+.avatar .sway{animation:bob 3.4s ease-in-out infinite;transform-box:view-box;transform-origin:50% 100%}
+.avatar[data-state="speaking"] .m{animation:2.4s linear infinite}
+.avatar[data-state="speaking"] .m1{animation-name:k1}
+.avatar[data-state="speaking"] .m2{animation-name:k2}
+.avatar[data-state="speaking"] .m3{animation-name:k3}
+.avatar[data-state="speaking"] .m4{animation-name:k4}
+.avatar[data-state="speaking"] .c{animation:kc 2.4s linear infinite}
+@media (prefers-reduced-motion:reduce){.avatar .m,.avatar .c,.avatar .lid,.avatar .sway{animation:none!important}.avatar .c{opacity:1}}
