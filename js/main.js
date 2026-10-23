@@ -2,7 +2,7 @@ import { ask, parseTurn, ApiError } from './api.js';
 import { buildSystemPrompt, OPENER_REQUEST, SUMMARY_SYSTEM, summaryRequest, SUGGESTIONS } from './prompt.js';
 import { AVATARS, AVATAR_IDS, mountAvatar, setAvatarState } from './avatars.js';
 import { PERSONAS } from './personas.js';
-import { recordPractice, streakStatus } from './streak.js';
+import { recordPractice, streakStatus, monthGrid, dayKey, weekStreaks } from './streak.js';
 import * as speech from './speech.js';
 import * as store from './storage.js';
 import * as ui from './ui.js';
@@ -140,12 +140,101 @@ function paintStreak() {
   badge.title = label;
 }
 
+// Calendar popover: opens on the streak badge, one month at a time.
+let calView = null;
+const FLAME = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>';
+
+const DOW = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+
+function calEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function paintCalendar() {
+  const pop = $('streak-pop');
+  const { year, month } = calView;
+  const now = new Date();
+  const todayKey = dayKey(now);
+  const atCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+
+  const nav = (label, delta, text, disabled) => {
+    const b = calEl('button', 'cal-nav', text);
+    b.type = 'button';
+    b.disabled = disabled;
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', () => {
+      const d = new Date(year, month + delta, 1);
+      calView = { year: d.getFullYear(), month: d.getMonth() };
+      paintCalendar();
+    });
+    return b;
+  };
+  const head = calEl('div', 'cal-head');
+  const navs = calEl('div', 'cal-navs');
+  navs.append(nav('Previous month', -1, '\u2039', false), nav('Next month', 1, '\u203A', atCurrentMonth));
+  head.append(calEl('strong', 'cal-title', monthLabel(year, month)), navs);
+
+  const grid = calEl('div', 'cal-grid');
+  for (const w of DOW) grid.append(calEl('span', 'cal-dow', w));
+  monthGrid(year, month, streak.days).forEach((cell, i) => {
+    const col = i % 7;
+    const c = calEl('span', 'cal-day' + (cell.week ? ' week' : '') + (col === 0 ? ' start' : '') + (col === 6 ? ' end' : '') + (cell.outside ? ' outside' : ''));
+    c.append(calEl('span', 'cal-num' + (cell.practised ? ' on' : '') + (cell.key === todayKey ? ' today' : ''), String(cell.day)));
+    grid.append(c);
+  });
+
+  const legend = calEl('div', 'cal-legend');
+  for (const [kind, text] of [['on', 'Practised'], ['today', 'Today'], ['week', 'Week counts']]) {
+    const item = calEl('span', 'cal-key');
+    item.append(calEl('i', `cal-swatch ${kind}`), text);
+    legend.append(item);
+  }
+
+  const { current, best } = weekStreaks(streak.days);
+  const stat = (value, label, flame) => {
+    const t = calEl('div', 'wk-stat');
+    const v = calEl('div', 'wk-val');
+    if (flame) v.insertAdjacentHTML('beforeend', FLAME);
+    v.append(String(value));
+    t.append(v, calEl('div', 'wk-label', label));
+    return t;
+  };
+  const stats = calEl('div', 'wk-stats');
+  stats.append(stat(current, 'Week streak', true), stat(best, 'Best streak', false));
+
+  pop.replaceChildren(head, grid, legend, calEl('hr', 'wk-rule'), stats);
+}
+
+function toggleCalendar(open = $('streak-pop').hidden) {
+  const pop = $('streak-pop');
+  if (open) {
+    const now = new Date();
+    calView = { year: now.getFullYear(), month: now.getMonth() };
+    paintCalendar();
+  }
+  pop.hidden = !open;
+  $('streak').setAttribute('aria-expanded', String(open));
+}
+
+$('streak').addEventListener('click', () => toggleCalendar());
+document.addEventListener('click', (e) => {
+  if (!$('streak-pop').hidden && !e.target.closest('#streak, #streak-pop')) toggleCalendar(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('streak-pop').hidden) toggleCalendar(false);
+});
+
 // A real exchange (a message and its reply) counts as practice for today.
 function recordPracticeToday() {
   const wasDone = streakStatus(streak).doneToday;
   streak = recordPractice(streak);
   store.saveStreak(streak);
   paintStreak();
+  if (!$('streak-pop').hidden) toggleCalendar(true);
   if (!wasDone) {
     const { count } = streakStatus(streak);
     ui.setStatus(statusEl, count > 1 ? `${count} days in a row. Keep it going!` : 'Streak started. Come back tomorrow!');
@@ -201,8 +290,9 @@ async function takeTurn(text, { hidden = false } = {}) {
     if (turn !== generation) return;
 
     const reply = parseTurn(raw);
-    chat.push({ role: 'assistant', raw, reply: reply.reply, correction: reply.correction });
-    store.addMistakes(reply.mistakes);
+    // A hidden turn is an instruction, not something the learner wrote, so nothing in it is a mistake.
+    chat.push({ role: 'assistant', raw, reply: reply.reply, correction: hidden ? '' : reply.correction });
+    if (!hidden) store.addMistakes(reply.mistakes);
     store.saveChat(owner, chat.slice(-100));
     if (!hidden) recordPracticeToday();
 

@@ -1,5 +1,5 @@
 // Caches the app shell so the page opens offline. API calls are never cached.
-const CACHE = 'sprechpartner-v36';
+const CACHE = 'sprechpartner-v42';
 const SHELL = [
   './',
   './index.html',

@@ -54,9 +54,16 @@ function renderEmpty({ hasKey, partner, suggestions, onStart, onSuggest }) {
   return box;
 }
 
-function renderUser(item) {
+// The tip comes with the avatar's reply but is about the learner's message, so it sits under that.
+function renderUser(item, tip) {
   const wrap = el('div', 'msg user');
   wrap.append(el('div', 'bubble', item.text));
+  if (tip) {
+    const fix = el('div', 'fix');
+    fix.append(el('b', '', 'Tip on your German: '));
+    fix.append(document.createTextNode(tip));
+    wrap.append(fix);
+  }
   return wrap;
 }
 
@@ -72,13 +79,6 @@ function renderBot(item, { onSpeak }) {
   say.append(speakerIcon());
   say.addEventListener('click', () => onSpeak(item.reply));
   wrap.append(say);
-
-  if (item.correction) {
-    const fix = el('div', 'fix');
-    fix.append(el('b', '', 'Tip: '));
-    fix.append(document.createTextNode(item.correction));
-    wrap.append(fix);
-  }
   return wrap;
 }
 
@@ -91,9 +91,11 @@ export function renderChat(container, history, { hasKey, partner, suggestions, o
     return;
   }
 
-  for (const item of visible) {
-    container.append(item.role === 'user' ? renderUser(item) : renderBot(item, { onSpeak }));
-  }
+  visible.forEach((item, i) => {
+    if (item.role !== 'user') return container.append(renderBot(item, { onSpeak }));
+    const next = visible[i + 1];
+    container.append(renderUser(item, next && next.role !== 'user' ? next.correction : ''));
+  });
   scrollToEnd(container);
 }
 

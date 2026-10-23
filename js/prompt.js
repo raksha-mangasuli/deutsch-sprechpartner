@@ -57,6 +57,8 @@ BEHAVIOUR:
 
 ${correctionRule}
 
+Only the learner's own words can contain errors. Never correct, rephrase or comment on your own earlier German, and never treat an instruction such as a request to start the conversation as learner text. If the learner's latest message is correct, "correction" must be empty and "mistakes" must be [].
+
 ${weakText}
 
 OUTPUT FORMAT: Respond with ONE JSON object and nothing else (no markdown fences). Keys:
